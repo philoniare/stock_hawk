@@ -7,18 +7,32 @@ import android.database.Cursor;
 import android.database.DatabaseUtils;
 import android.os.RemoteException;
 import android.util.Log;
+
 import com.google.android.gms.gcm.GcmNetworkManager;
 import com.google.android.gms.gcm.GcmTaskService;
 import com.google.android.gms.gcm.TaskParams;
+import com.sam_chordas.android.stockhawk.api.ResponseHistoricalData;
+import com.sam_chordas.android.stockhawk.api.StockAPIClient;
+import com.sam_chordas.android.stockhawk.api.StockQuote;
 import com.sam_chordas.android.stockhawk.data.QuoteColumns;
 import com.sam_chordas.android.stockhawk.data.QuoteProvider;
 import com.sam_chordas.android.stockhawk.rest.Utils;
 import com.squareup.okhttp.OkHttpClient;
 import com.squareup.okhttp.Request;
 import com.squareup.okhttp.Response;
+
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+
+import retrofit2.Call;
+import retrofit2.Retrofit;
+import retrofit2.converter.gson.GsonConverterFactory;
 
 /**
  * Created by sam_chordas on 9/30/15.
@@ -38,6 +52,7 @@ public class StockTaskService extends GcmTaskService{
   public StockTaskService(Context context){
     mContext = context;
   }
+
   String fetchData(String url) throws IOException{
     Request request = new Request.Builder()
         .url(url)
@@ -134,4 +149,42 @@ public class StockTaskService extends GcmTaskService{
     return result;
   }
 
+
+  public List<ResponseHistoricalData.Quote> getHistoricalData(StockQuote quote)
+          throws IOException, RemoteException, OperationApplicationException {
+
+    // Load historic stock data
+    SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault());
+    Date currentDate = new Date();
+
+    Calendar calEnd = Calendar.getInstance();
+    calEnd.setTime(currentDate);
+    calEnd.add(Calendar.DATE, 0);
+
+    Calendar calStart = Calendar.getInstance();
+    calStart.setTime(currentDate);
+    calStart.add(Calendar.MONTH, -1);
+
+    String startDate = dateFormat.format(calStart.getTime());
+    String endDate = dateFormat.format(calEnd.getTime());
+
+    String query = "select * from yahoo.finance.historicaldata where symbol=\"" +
+            quote.getSymbol() +
+            "\" and startDate=\"" + startDate + "\" and endDate=\"" + endDate + "\"";
+
+    Retrofit retrofit = new Retrofit.Builder()
+            .baseUrl(StockAPIClient.API_BASE_URL)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build();
+
+    StockAPIClient stockService = retrofit.create(StockAPIClient.class);
+    Call<ResponseHistoricalData> call = stockService.getStockHistoricalData(query);
+    retrofit2.Response<ResponseHistoricalData> response;
+    response = call.execute();
+    ResponseHistoricalData historicalData = response.body();
+    if (historicalData != null) {
+      return historicalData.getHistoricData();
+    }
+    return null;
+  }
 }

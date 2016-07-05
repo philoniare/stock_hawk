@@ -86,7 +86,12 @@ public class MyStocksActivity extends AppCompatActivity implements
     recyclerView.addOnItemTouchListener(new RecyclerViewItemClickListener(this,
             new RecyclerViewItemClickListener.OnItemClickListener() {
               @Override public void onItemClick(View v, int position) {
+                Cursor c = mCursorAdapter.getCursor();
+                c.moveToPosition(position);
+                String symbol = c.getString(c.getColumnIndex(QuoteColumns.SYMBOL));
+                c.close();
                 Intent stockGraphIntent = new Intent(mContext, StockGraphActivity.class);
+                stockGraphIntent.putExtra("Symbol", symbol);
                 startActivity(stockGraphIntent);
               }
             }));

@@ -4,6 +4,7 @@ package com.sam_chordas.android.stockhawk.api;
 import com.google.gson.annotations.SerializedName;
 
 import java.util.ArrayList;
+import java.util.List;
 
 public class ResponseStock {
   @SerializedName("query")
