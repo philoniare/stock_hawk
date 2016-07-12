@@ -7,5 +7,11 @@
   <string name="content_test">Search for a Stock Symbol</string>
   <string name="input_hint">FB</string>
   <string name="input_prefill"></string>
+  <string name="stock_saved">This stock is already saved!</string>
   <string name="network_toast">Uh-oh! This app requires an internet connection</string>
+
+  <!-- Content Descriptions for Buttons-->
+  <string name="desc_graph_stock">Graph the stock</string>
+  <string name="desc_add_stock">Add stock quote</string>
+
 </resources>
