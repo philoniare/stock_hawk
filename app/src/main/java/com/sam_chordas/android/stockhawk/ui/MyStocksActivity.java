@@ -97,7 +97,6 @@ public class MyStocksActivity extends AppCompatActivity implements
             }));
     recyclerView.setAdapter(mCursorAdapter);
 
-
     FloatingActionButton fab = (FloatingActionButton) findViewById(R.id.fab);
     fab.attachToRecyclerView(recyclerView);
     fab.setOnClickListener(new View.OnClickListener() {
@@ -110,22 +109,7 @@ public class MyStocksActivity extends AppCompatActivity implements
                 @Override public void onInput(MaterialDialog dialog, CharSequence input) {
                   // On FAB click, receive user input. Make sure the stock doesn't already exist
                   // in the DB and proceed accordingly
-                  Cursor c = getContentResolver().query(QuoteProvider.Quotes.CONTENT_URI,
-                      new String[] { QuoteColumns.SYMBOL }, QuoteColumns.SYMBOL + "= ?",
-                      new String[] { input.toString() }, null);
-                  if (c.getCount() != 0) {
-                    Toast toast =
-                        Toast.makeText(MyStocksActivity.this, "This stock is already saved!",
-                            Toast.LENGTH_LONG);
-                    toast.setGravity(Gravity.CENTER, Gravity.CENTER, 0);
-                    toast.show();
-                    return;
-                  } else {
-                    // Add the stock to DB
-                    mServiceIntent.putExtra("tag", "add");
-                    mServiceIntent.putExtra("symbol", input.toString());
-                    startService(mServiceIntent);
-                  }
+                  checkAndAddQuote(input.toString());
                 }
               })
               .show();
@@ -162,6 +146,25 @@ public class MyStocksActivity extends AppCompatActivity implements
     }
   }
 
+  private void checkAndAddQuote(final String quote) {
+    // Check if quote exists in DB
+    Cursor c = getContentResolver().query(QuoteProvider.Quotes.CONTENT_URI,
+            new String[] { QuoteColumns.SYMBOL }, QuoteColumns.SYMBOL + "= ?",
+            new String[] { quote }, null);
+    if (c.getCount() != 0) {
+      Toast toast =
+              Toast.makeText(MyStocksActivity.this, "This stock is already saved!",
+                      Toast.LENGTH_LONG);
+      toast.setGravity(Gravity.CENTER, Gravity.CENTER, 0);
+      toast.show();
+      return;
+    } else {
+      // Add the stock to DB
+      mServiceIntent.putExtra("tag", "add");
+      mServiceIntent.putExtra("symbol", quote);
+      startService(mServiceIntent);
+    }
+  }
 
   @Override
   public void onResume() {
@@ -193,11 +196,6 @@ public class MyStocksActivity extends AppCompatActivity implements
     // automatically handle clicks on the Home/Up button, so long
     // as you specify a parent activity in AndroidManifest.xml.
     int id = item.getItemId();
-
-    //noinspection SimplifiableIfStatement
-    if (id == R.id.action_settings) {
-      return true;
-    }
 
     if (id == R.id.action_change_units){
       // this is for changing stock changes from percent value to dollar value

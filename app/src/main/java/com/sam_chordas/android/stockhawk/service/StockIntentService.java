@@ -10,6 +10,12 @@ import com.google.android.gms.gcm.TaskParams;
  * Created by sam_chordas on 10/1/15.
  */
 public class StockIntentService extends IntentService {
+  // Keys for data passed in
+  public static final String EXTRA_TAG = "tag";
+  public static final String EXTRA_SYMBOL = "symbol";
+
+  public static final String ACTION_INIT = "init";
+  public static final String ACTION_ADD = "add";
 
   public StockIntentService(){
     super(StockIntentService.class.getName());

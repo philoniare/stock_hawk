@@ -1,5 +1,7 @@
 package com.sam_chordas.android.stockhawk.service;
 
+import android.content.ContentProviderOperation;
+import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.OperationApplicationException;
@@ -12,19 +14,17 @@ import com.google.android.gms.gcm.GcmNetworkManager;
 import com.google.android.gms.gcm.GcmTaskService;
 import com.google.android.gms.gcm.TaskParams;
 import com.sam_chordas.android.stockhawk.api.ResponseHistoricalData;
+import com.sam_chordas.android.stockhawk.api.ResponseStock;
 import com.sam_chordas.android.stockhawk.api.StockAPIClient;
 import com.sam_chordas.android.stockhawk.api.StockQuote;
 import com.sam_chordas.android.stockhawk.data.QuoteColumns;
 import com.sam_chordas.android.stockhawk.data.QuoteProvider;
 import com.sam_chordas.android.stockhawk.rest.Utils;
-import com.squareup.okhttp.OkHttpClient;
-import com.squareup.okhttp.Request;
-import com.squareup.okhttp.Response;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
-import java.net.URLEncoder;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
@@ -42,10 +42,11 @@ import retrofit2.converter.gson.GsonConverterFactory;
 public class StockTaskService extends GcmTaskService{
   private String LOG_TAG = StockTaskService.class.getSimpleName();
 
-  private OkHttpClient client = new OkHttpClient();
+  private final static String INIT_QUOTES = "\"YHOO\",\"AAPL\",\"GOOG\",\"MSFT\"";
+  private final static String TAG_PERIODIC = "periodic";
   private Context mContext;
   private StringBuilder mStoredSymbols = new StringBuilder();
-  private boolean isUpdate;
+  private boolean mIsUpdate;
 
   public StockTaskService(){}
 
@@ -53,100 +54,88 @@ public class StockTaskService extends GcmTaskService{
     mContext = context;
   }
 
-  String fetchData(String url) throws IOException{
-    Request request = new Request.Builder()
-        .url(url)
-        .build();
-
-    Response response = client.newCall(request).execute();
-    return response.body().string();
-  }
-
   @Override
   public int onRunTask(TaskParams params){
-    Cursor initQueryCursor;
-    if (mContext == null){
-      mContext = this;
+    if (mContext == null) {
+      return GcmNetworkManager.RESULT_FAILURE;
     }
-    StringBuilder urlStringBuilder = new StringBuilder();
-    try{
-      // Base URL for the Yahoo query
-      urlStringBuilder.append("https://query.yahooapis.com/v1/public/yql?q=");
-      urlStringBuilder.append(URLEncoder.encode("select * from yahoo.finance.quotes where symbol "
-        + "in (", "UTF-8"));
-    } catch (UnsupportedEncodingException e) {
-      e.printStackTrace();
+    try {
+
+      // Load relevant data about stocks
+      Retrofit retrofit = new Retrofit.Builder()
+              .baseUrl(StockAPIClient.API_BASE_URL)
+              .addConverterFactory(GsonConverterFactory.create())
+              .build();
+      StockAPIClient client = retrofit.create(StockAPIClient.class);
+      String query = "select * from yahoo.finance.quotes where symbol in ("
+              + buildUrl(params)
+              + ")";
+
+        Call<ResponseStock> call = client.getStock(query);
+        retrofit2.Response<ResponseStock> response = call.execute();
+        ResponseStock responseGetStock = response.body();
+        saveQuotesToDB(responseGetStock.getStockQuotes());
+
+      return GcmNetworkManager.RESULT_SUCCESS;
+
+    } catch (Exception e) {
+      Log.e(LOG_TAG, e.getMessage(), e);
+      return GcmNetworkManager.RESULT_FAILURE;
     }
-    if (params.getTag().equals("init") || params.getTag().equals("periodic")){
-      isUpdate = true;
-      initQueryCursor = mContext.getContentResolver().query(QuoteProvider.Quotes.CONTENT_URI,
-          new String[] { "Distinct " + QuoteColumns.SYMBOL }, null,
-          null, null);
-      if (initQueryCursor.getCount() == 0 || initQueryCursor == null){
+  }
+
+  private String buildUrl(TaskParams params) throws UnsupportedEncodingException {
+    ContentResolver resolver = mContext.getContentResolver();
+    if (params.getTag().equals(StockIntentService.ACTION_INIT)
+            || params.getTag().equals(TAG_PERIODIC)) {
+      mIsUpdate = true;
+      Cursor cursor = resolver.query(QuoteProvider.Quotes.CONTENT_URI,
+              new String[]{"Distinct " + QuoteColumns.SYMBOL}, null,
+              null, null);
+
+      if (cursor != null && cursor.getCount() == 0 || cursor == null) {
         // Init task. Populates DB with quotes for the symbols seen below
-        try {
-          urlStringBuilder.append(
-              URLEncoder.encode("\"YHOO\",\"AAPL\",\"GOOG\",\"MSFT\")", "UTF-8"));
-        } catch (UnsupportedEncodingException e) {
-          e.printStackTrace();
+        return INIT_QUOTES;
+      } else {
+        DatabaseUtils.dumpCursor(cursor);
+        cursor.moveToFirst();
+        for (int i = 0; i < cursor.getCount(); i++) {
+          mStoredSymbols.append("\"");
+          mStoredSymbols.append(cursor.getString(
+                  cursor.getColumnIndex(QuoteColumns.SYMBOL)));
+          mStoredSymbols.append("\",");
+          cursor.moveToNext();
         }
-      } else if (initQueryCursor != null){
-        DatabaseUtils.dumpCursor(initQueryCursor);
-        initQueryCursor.moveToFirst();
-        for (int i = 0; i < initQueryCursor.getCount(); i++){
-          mStoredSymbols.append("\""+
-              initQueryCursor.getString(initQueryCursor.getColumnIndex("symbol"))+"\",");
-          initQueryCursor.moveToNext();
-        }
-        mStoredSymbols.replace(mStoredSymbols.length() - 1, mStoredSymbols.length(), ")");
-        try {
-          urlStringBuilder.append(URLEncoder.encode(mStoredSymbols.toString(), "UTF-8"));
-        } catch (UnsupportedEncodingException e) {
-          e.printStackTrace();
-        }
+        mStoredSymbols.replace(mStoredSymbols.length() - 1, mStoredSymbols.length(), "");
+        return mStoredSymbols.toString();
       }
-    } else if (params.getTag().equals("add")){
-      isUpdate = false;
-      // get symbol from params.getExtra and build query
-      String stockInput = params.getExtras().getString("symbol");
-      try {
-        urlStringBuilder.append(URLEncoder.encode("\""+stockInput+"\")", "UTF-8"));
-      } catch (UnsupportedEncodingException e){
-        e.printStackTrace();
-      }
+    } else if (params.getTag().equals(StockIntentService.ACTION_ADD)) {
+      mIsUpdate = false;
+      // Get symbol from params.getExtra and build query
+      String stockInput = params.getExtras().getString(StockIntentService.EXTRA_SYMBOL);
+      return "\"" + stockInput + "\"";
+    } else {
+      throw new IllegalStateException("Action not specified in TaskParams.");
     }
-    // finalize the URL for the API query.
-    urlStringBuilder.append("&format=json&diagnostics=true&env=store%3A%2F%2Fdatatables."
-        + "org%2Falltableswithkeys&callback=");
+  }
 
-    String urlString;
-    String getResponse;
-    int result = GcmNetworkManager.RESULT_FAILURE;
+  private void saveQuotesToDB(List<StockQuote> quotes) throws RemoteException,
+          OperationApplicationException {
 
-    if (urlStringBuilder != null){
-      urlString = urlStringBuilder.toString();
-      try{
-        getResponse = fetchData(urlString);
-        result = GcmNetworkManager.RESULT_SUCCESS;
-        try {
-          ContentValues contentValues = new ContentValues();
-          // update ISCURRENT to 0 (false) so new data is current
-          if (isUpdate){
-            contentValues.put(QuoteColumns.ISCURRENT, 0);
-            mContext.getContentResolver().update(QuoteProvider.Quotes.CONTENT_URI, contentValues,
-                null, null);
-          }
-          mContext.getContentResolver().applyBatch(QuoteProvider.AUTHORITY,
-              Utils.quoteJsonToContentVals(getResponse));
-        }catch (RemoteException | OperationApplicationException e){
-          Log.e(LOG_TAG, "Error applying batch insert", e);
-        }
-      } catch (IOException e){
-        e.printStackTrace();
-      }
+    ContentResolver resolver = mContext.getContentResolver();
+    ArrayList<ContentProviderOperation> batchOperations = new ArrayList<>();
+    for (StockQuote quote : quotes) {
+      batchOperations.add(Utils.buildBatchOperation(quote));
     }
 
-    return result;
+    // Update is_current to 0 (false), so new data is current.
+    if (mIsUpdate) {
+      ContentValues contentValues = new ContentValues();
+      contentValues.put(QuoteColumns.ISCURRENT, 0);
+      resolver.update(QuoteProvider.Quotes.CONTENT_URI, contentValues, null, null);
+    }
+
+    resolver.applyBatch(QuoteProvider.AUTHORITY, batchOperations);
   }
 
 
